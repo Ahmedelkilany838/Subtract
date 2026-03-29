@@ -420,6 +420,242 @@ const ServiceLogo = ({
   );
 };
 
+// ─── Calendar View Component ──────────────────────────────────────────────────
+function CalendarView({
+  subscriptions,
+  convertToDisplay,
+  displayCurrency,
+}: {
+  subscriptions: Subscription[];
+  convertToDisplay: (amount: number, currency: string) => number;
+  displayCurrency: string;
+}) {
+  const today = new Date();
+  const [viewDate, setViewDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+
+  const year  = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+
+  const monthName  = viewDate.toLocaleString('en-US', { month: 'long' });
+  const firstDay   = new Date(year, month, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  // Build a map: day → subscriptions that bill on that day
+  const dayMap = useMemo(() => {
+    const map: Record<number, Subscription[]> = {};
+    subscriptions.forEach(sub => {
+      // Use createdAt as a proxy for billing day (day-of-month)
+      let billingDay: number | null = null;
+      if (sub.createdAt?.toDate) {
+        billingDay = sub.createdAt.toDate().getDate();
+      } else if (sub.createdAt) {
+        billingDay = new Date(sub.createdAt).getDate();
+      }
+      if (billingDay && billingDay >= 1 && billingDay <= daysInMonth) {
+        if (!map[billingDay]) map[billingDay] = [];
+        map[billingDay].push(sub);
+      }
+    });
+    return map;
+  }, [subscriptions, daysInMonth]);
+
+  const totalThisMonth = subscriptions.reduce((sum, sub) => {
+    const monthly = sub.billingCycle === 'yearly'
+      ? convertToDisplay(sub.amount, sub.currency) / 12
+      : convertToDisplay(sub.amount, sub.currency);
+    return sum + monthly;
+  }, 0);
+
+  const currencySymbol = displayCurrency === 'USD' ? '$' : displayCurrency === 'EUR' ? '€' : displayCurrency === 'GBP' ? '£' : displayCurrency;
+
+  const prev = () => setViewDate(new Date(year, month - 1, 1));
+  const next = () => setViewDate(new Date(year, month + 1, 1));
+
+  // Generate grid cells: leading empty + day numbers
+  const cells: Array<{ day: number | null }> = [];
+  for (let i = 0; i < firstDay; i++) cells.push({ day: null });
+  for (let d = 1; d <= daysInMonth; d++) cells.push({ day: d });
+
+  const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  return (
+    <motion.div
+      key={`${year}-${month}`}
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+      className="max-w-7xl mx-auto px-4 md:px-8 py-8"
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h2 className="text-2xl font-medium text-foreground tracking-tight">{monthName} {year}</h2>
+          <p className="text-muted-foreground text-xs mt-1">
+            {subscriptions.length} subscriptions · {currencySymbol}{Math.round(totalThisMonth)}/mo
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={prev}
+            className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center hover:bg-accent transition-all text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setViewDate(new Date(today.getFullYear(), today.getMonth(), 1))}
+            className="px-3 h-8 rounded-lg bg-card border border-border text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-accent transition-all"
+          >
+            Today
+          </button>
+          <button
+            onClick={next}
+            className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center hover:bg-accent transition-all text-muted-foreground hover:text-foreground"
+          >
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Day-of-week labels */}
+      <div className="grid grid-cols-7 mb-2">
+        {DAY_LABELS.map(d => (
+          <div key={d} className="text-center text-[10px] font-medium text-muted-foreground uppercase tracking-widest py-2">
+            {d}
+          </div>
+        ))}
+      </div>
+
+      {/* Calendar Grid */}
+      <div className="grid grid-cols-7 gap-1.5">
+        {cells.map((cell, i) => {
+          const isToday = cell.day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+          const subs = cell.day ? (dayMap[cell.day] || []) : [];
+          return (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: i * 0.008, duration: 0.25 }}
+              className={cn(
+                "min-h-[80px] md:min-h-[100px] rounded-xl p-2 border transition-all",
+                cell.day
+                  ? isToday
+                    ? "bg-primary/10 border-primary/40"
+                    : subs.length > 0
+                      ? "bg-card border-border hover:bg-accent cursor-default"
+                      : "bg-card/50 border-border/50"
+                  : "bg-transparent border-transparent"
+              )}
+            >
+              {cell.day && (
+                <>
+                  <span className={cn(
+                    "text-[11px] font-semibold leading-none",
+                    isToday ? "text-primary" : "text-muted-foreground"
+                  )}>
+                    {cell.day}
+                  </span>
+                  <div className="mt-1.5 space-y-1">
+                    {subs.slice(0, 2).map(sub => (
+                      <motion.div
+                        key={sub.id}
+                        initial={{ opacity: 0, x: -4 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="flex items-center gap-1 rounded-md bg-muted/80 px-1.5 py-1 overflow-hidden"
+                        title={`${sub.serviceName} · ${currencySymbol}${Math.round(convertToDisplay(sub.amount, sub.currency))}`}
+                      >
+                        <div className="w-4 h-4 rounded-sm overflow-hidden shrink-0">
+                          <ServiceLogo
+                            name={sub.serviceName}
+                            domain={sub.domain}
+                            slug={sub.slug}
+                            color={sub.color}
+                            className="w-full h-full"
+                          />
+                        </div>
+                        <span className="text-[9px] font-medium text-foreground truncate leading-none">
+                          {sub.serviceName}
+                        </span>
+                      </motion.div>
+                    ))}
+                    {subs.length > 2 && (
+                      <span className="text-[9px] text-muted-foreground font-medium pl-1">
+                        +{subs.length - 2} more
+                      </span>
+                    )}
+                  </div>
+                </>
+              )}
+            </motion.div>
+          );
+        })}
+      </div>
+
+      {/* Monthly Summary Strip */}
+      {subscriptions.length > 0 && (
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.3 }}
+          className="mt-6 p-4 rounded-xl bg-card border border-border flex flex-wrap gap-3"
+        >
+          <div className="text-[10px] text-muted-foreground uppercase tracking-widest font-medium self-center mr-2">
+            This month
+          </div>
+          {subscriptions.map(sub => {
+            const monthly = sub.billingCycle === 'yearly'
+              ? convertToDisplay(sub.amount, sub.currency) / 12
+              : convertToDisplay(sub.amount, sub.currency);
+            return (
+              <div key={sub.id} className="flex items-center gap-2 bg-muted rounded-lg px-3 py-2">
+                <div className="w-5 h-5 rounded-md overflow-hidden shrink-0">
+                  <ServiceLogo
+                    name={sub.serviceName}
+                    domain={sub.domain}
+                    slug={sub.slug}
+                    color={sub.color}
+                    className="w-full h-full"
+                  />
+                </div>
+                <span className="text-xs font-medium text-foreground">{sub.serviceName}</span>
+                <span className="text-[10px] text-muted-foreground tabular-nums">
+                  {currencySymbol}{Math.round(monthly)}
+                </span>
+              </div>
+            );
+          })}
+        </motion.div>
+      )}
+    </motion.div>
+  );
+}
+
+// ─── Loading Screen ───────────────────────────────────────────────────────────
+function LoadingScreen() {
+  const [showSlow, setShowSlow] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setShowSlow(true), 3000);
+    return () => clearTimeout(t);
+  }, []);
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="flex flex-col items-center gap-6">
+        <div className="w-14 h-14 border-[3px] border-primary/20 border-t-primary rounded-full animate-spin" />
+        <div className="flex flex-col items-center gap-2">
+          <p className="text-muted-foreground text-[10px] uppercase tracking-[0.3em] font-black">
+            Initializing Secure Session
+          </p>
+          {showSlow && (
+            <p className="text-muted-foreground/50 text-[10px] text-center max-w-[200px] leading-relaxed">
+              Taking longer than usual — check your connection
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <AppContent />
@@ -433,7 +669,7 @@ function AppContent() {
   const [displayCurrency, setDisplayCurrency] = useState('USD');
   const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({});
   const [isAddingInline, setIsAddingInline] = useState(false);
-  const [activeView, setActiveView] = useState<'list' | 'dashboard'>('list');
+  const [activeView, setActiveView] = useState<'list' | 'dashboard' | 'calendar'>('list');
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window !== 'undefined') {
       return localStorage.getItem('theme') as 'light' | 'dark' || 'dark';
@@ -458,7 +694,13 @@ function AppContent() {
 
   // Auth Listener
   useEffect(() => {
+    // Safety timeout: if Firebase auth never responds within 5s, unblock the UI
+    const authTimeout = setTimeout(() => {
+      setAuthReady(true);
+    }, 5000);
+
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
+      clearTimeout(authTimeout);
       setUser(user);
       if (user) {
         // Sync user profile/settings
@@ -470,8 +712,8 @@ function AppContent() {
             setBudgetGoal(data.budgetGoal || 500);
             setDisplayCurrency(data.displayCurrency || 'USD');
           } else {
-            // Initialize user doc
-            await setDoc(userDocRef, {
+            // Initialize user doc (fire-and-forget, don't block auth)
+            setDoc(userDocRef, {
               email: user.email,
               displayName: user.displayName,
               photoURL: user.photoURL,
@@ -479,15 +721,25 @@ function AppContent() {
               displayCurrency: 'USD',
               role: 'user',
               createdAt: serverTimestamp()
+            }).catch((error) => {
+              console.error('Failed to initialize user doc:', error);
             });
           }
         } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
+          // Don't throw — just log. We still want to show the app.
+          console.error('Failed to load user settings:', error);
+        } finally {
+          setAuthReady(true);
         }
+      } else {
+        setAuthReady(true);
       }
-      setAuthReady(true);
     });
-    return () => unsubscribe();
+
+    return () => {
+      clearTimeout(authTimeout);
+      unsubscribe();
+    };
   }, []);
 
   // Firestore Subscriptions Listener
@@ -717,14 +969,7 @@ function AppContent() {
   const currencySymbol = CURRENCIES.find(c => c.code === displayCurrency)?.symbol || displayCurrency;
 
   if (!authReady) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="flex flex-col items-center gap-6">
-          <div className="w-16 h-16 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
-          <p className="text-muted-foreground text-[10px] uppercase tracking-[0.3em] font-black animate-pulse">Initializing Secure Session</p>
-        </div>
-      </div>
-    );
+    return <LoadingScreen />;
   }
 
   if (!user) {
@@ -884,6 +1129,16 @@ function AppContent() {
               >
                 <Activity className="w-3 h-3" />
                 <span className="hidden sm:inline">Dashboard</span>
+              </button>
+              <button
+                onClick={() => setActiveView('calendar')}
+                className={cn(
+                  "px-3 py-1 rounded-md text-[11px] font-medium transition-all flex items-center gap-2",
+                  activeView === 'calendar' ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Calendar className="w-3 h-3" />
+                <span className="hidden sm:inline">Calendar</span>
               </button>
             </div>
             <div className="flex items-center gap-2 md:gap-3">
@@ -1463,7 +1718,7 @@ function AppContent() {
           </div>
         </section>
           </>
-        ) : (
+        ) : activeView === 'dashboard' ? (
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1634,7 +1889,16 @@ function AppContent() {
               </div>
             </div>
           </motion.div>
-        )}
+        ) : activeView === 'calendar' ? (
+          <motion.div
+            key="calendar"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <CalendarView subscriptions={subscriptions} convertToDisplay={convertToDisplay} displayCurrency={displayCurrency} />
+          </motion.div>
+        ) : null}
 
         <footer className="mt-32 text-center pb-12 border-t border-border pt-12">
           <div className="flex items-center justify-center gap-4 mb-6">

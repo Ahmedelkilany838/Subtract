@@ -113,8 +113,8 @@ export const handleFirestoreError = (
   throw new Error(JSON.stringify(errInfo));
 };
 
-// Connection Test
-async function testConnection() {
+// Connection Test (not auto-called to avoid startup delay)
+export async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));
   } catch (error) {
@@ -123,7 +123,6 @@ async function testConnection() {
     }
   }
 }
-testConnection();
 
 // Re-export Firestore functions
 export { 
